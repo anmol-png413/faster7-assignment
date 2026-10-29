@@ -20,6 +20,12 @@ export default function App() {
 
   return (
     <div className="app">
+      <nav className="tabs">
+        <a className="tab" href="https://faster7-assignment.vercel.app/" target="_blank" rel="noopener noreferrer">
+          Node.js CRM
+        </a>
+        <span className="tab active">React App</span>
+      </nav>
       {token ? (
         <Restaurants token={token} onLogout={handleLogout} />
       ) : phone ? (
