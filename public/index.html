@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CRM Demo</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f3f4f6; color: #111827; }
+  header { background: #1f2937; color: #fff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { font-size: 18px; margin: 0; }
+  main { max-width: 960px; margin: 20px auto; padding: 0 16px; display: grid; gap: 16px; }
+  .card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .card h2 { margin: 0 0 12px; font-size: 16px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  input, textarea { padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font: inherit; flex: 1; min-width: 160px; }
+  button { padding: 8px 14px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; font: inherit; }
+  button.secondary { background: #6b7280; }
+  button:hover { opacity: .9; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #e5e7eb; }
+  .msg { margin-top: 8px; font-size: 14px; }
+  .ok { color: #15803d; } .err { color: #b91c1c; }
+  .hidden { display: none; }
+  .empty { color: #6b7280; font-size: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CRM Demo</h1>
+  <div id="userbox" class="hidden">
+    <span id="who"></span> <button class="secondary" id="logout">Logout</button>
+  </div>
+</header>
+
+<main>
+  <section class="card" id="authCard">
+    <h2>Employee Login / Register</h2>
+    <div class="row">
+      <input id="aName" placeholder="Name (only for register)">
+      <input id="aEmail" placeholder="Email" type="email">
+      <input id="aPass" placeholder="Password" type="password">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="login">Login</button>
+      <button id="register" class="secondary">Register</button>
+    </div>
+    <div class="msg" id="authMsg"></div>
+  </section>
+
+  <section class="card">
+    <h2>Public Enquiry Form (no login needed)</h2>
+    <div class="row">
+      <input id="eName" placeholder="Name *">
+      <input id="eEmail" placeholder="Email *" type="email">
+      <input id="ePhone" placeholder="Phone">
+      <input id="eCourse" placeholder="Course interest *">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <textarea id="eMsg" rows="2" placeholder="Message"></textarea>
+    </div>
+    <div class="row" style="margin-top:8px"><button id="submitEnquiry">Submit enquiry</button></div>
+    <div class="msg" id="enqMsg"></div>
+  </section>
+
+  <section class="card hidden" id="crm">
+    <h2>Unclaimed Leads (public) <button class="secondary" id="refresh">Refresh</button></h2>
+    <div id="unclaimed"></div>
+  </section>
+
+  <section class="card hidden" id="mineCard">
+    <h2>My Claimed Leads (private)</h2>
+    <div id="mine"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let token = localStorage.getItem('token');
+let user = JSON.parse(localStorage.getItem('user') || 'null');
+
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+function say(el, text, ok) { el.textContent = text; el.className = 'msg ' + (ok ? 'ok' : 'err'); }
+
+function table(leads, withClaim) {
+  if (!leads.length) return '<div class="empty">No leads.</div>';
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  return '<table><tr><th>ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Course</th><th>Message</th>' +
+    (withClaim ? '<th></th>' : '') + '</tr>' +
+    leads.map((l) => `<tr><td>${l.id}</td><td>${esc(l.name)}</td><td>${esc(l.email)}</td><td>${esc(l.phone)}</td>` +
+      `<td>${esc(l.course_interest)}</td><td>${esc(l.message)}</td>` +
+      (withClaim ? `<td><button onclick="claim(${l.id})">Claim</button></td>` : '') + '</tr>').join('') + '</table>';
+}
+
+async function load() {
+  try {
+    const [u, m] = await Promise.all([api('GET', '/api/leads/unclaimed'), api('GET', '/api/leads/mine')]);
+    $('unclaimed').innerHTML = table(u.leads, true);
+    $('mine').innerHTML = table(m.leads, false);
+  } catch (e) { if (/token|Authorization/i.test(e.message)) logout(); }
+}
+
+function render() {
+  const loggedIn = !!token;
+  $('authCard').classList.toggle('hidden', loggedIn);
+  $('userbox').classList.toggle('hidden', !loggedIn);
+  $('crm').classList.toggle('hidden', !loggedIn);
+  $('mineCard').classList.toggle('hidden', !loggedIn);
+  if (loggedIn) { $('who').textContent = user ? user.name + ' (' + user.email + ')' : ''; load(); }
+}
+
+function setSession(data) {
+  token = data.token; user = data.employee;
+  localStorage.setItem('token', token); localStorage.setItem('user', JSON.stringify(user));
+  render();
+}
+
+function logout() {
+  token = null; user = null; localStorage.clear(); render();
+}
+
+async function auth(path) {
+  try {
+    const body = { email: $('aEmail').value, password: $('aPass').value };
+    if (path === 'register') body.name = $('aName').value;
+    setSession(await api('POST', '/api/auth/' + path, body));
+  } catch (e) { say($('authMsg'), e.message, false); }
+}
+
+async function claim(id) {
+  try { await api('POST', `/api/leads/${id}/claim`); }
+  catch (e) { alert(e.message); }
+  load();
+}
+
+$('login').onclick = () => auth('login');
+$('register').onclick = () => auth('register');
+$('logout').onclick = logout;
+$('refresh').onclick = load;
+$('submitEnquiry').onclick = async () => {
+  try {
+    await api('POST', '/api/enquiries', {
+      name: $('eName').value, email: $('eEmail').value, phone: $('ePhone').value,
+      course_interest: $('eCourse').value, message: $('eMsg').value,
+    });
+    say($('enqMsg'), 'Enquiry submitted!', true);
+    ['eName', 'eEmail', 'ePhone', 'eCourse', 'eMsg'].forEach((i) => ($(i).value = ''));
+    if (token) load();
+  } catch (e) { say($('enqMsg'), e.message, false); }
+};
+
+render();
+</script>
+</body>
+</html>
